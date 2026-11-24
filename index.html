@@ -29,6 +29,16 @@ summary strong{font-size:1.06rem}
 .actions{display:flex;flex-wrap:wrap;gap:.65rem;margin-bottom:.2rem}
 .actions a{display:inline-block;border:1px solid #8293ab;border-radius:8px;padding:.55rem .75rem;color:#183d64;font-weight:650;text-decoration:none}
 .status{margin-left:1.25rem;display:block;font-size:.9rem;font-weight:650;color:#465975}
+.stage{--tone:#1b57a2;--wash:#e8f1ff;display:inline-flex;align-items:center;gap:.45rem;max-width:100%;margin:.45rem 0 .15rem 1.25rem;padding:.24rem .65rem;border-left:4px solid var(--tone);border-radius:6px;background:var(--wash);color:var(--tone);font-size:.88rem;font-weight:750}
+.stage.first_reply{--tone:#00635d;--wash:#dcf6f1}
+.stage.discussing{--tone:#814800;--wash:#fff0d5}
+.stage.in_progress{--tone:#6436a4;--wash:#f0e6ff}
+.stage.completed{--tone:#21683e;--wash:#e1f5e7}
+.stage.closed{--tone:#4e596d;--wash:#eceff4}
+.stage.undelivered{--tone:#992d37;--wash:#ffe8eb}
+.stage-control{display:block;margin:1rem 0}
+.stage-control select{max-width:100%;width:16rem}
+.stage-note{display:block;margin-top:.35rem;color:#465975;font-size:.875rem;font-weight:400}
 .status.replied{color:#00634b}
 .status.bounced{color:#9d2525}
 select{font:inherit;display:block;margin-top:.3rem;padding:.65rem .6rem;border:1px solid #8293ab;border-radius:8px;background:white;color:inherit}
@@ -534,6 +544,27 @@ const formatter = new Intl.DateTimeFormat('ru-RU', {
 const query = document.querySelector('#query');
 const statusFilter = document.querySelector('#status');
 const statuses = {replied:'Есть ответ', waiting:'Пока без ответа', bounced:'Не доставлено', automatic:'Автоответ', unchecked:'Не проверено'};
+const stages = {
+  first_email:'Первое письмо',
+  first_reply:'Первый ответ',
+  discussing:'Обсуждается',
+  in_progress:'В работе',
+  completed:'Выполнено',
+  closed:'Закрыто',
+  undelivered:'Не доставлено'
+};
+const stageKey = 'outreach-log:stages:v1';
+let stageOverrides = {};
+try {
+  stageOverrides = JSON.parse(localStorage.getItem(stageKey) || '{}') || {};
+} catch {}
+function currentStage(item) {
+  const saved = stageOverrides[item.gmailThreadId];
+  if (Object.hasOwn(stages, saved)) return saved;
+  if (item.replyStatus === 'replied') return 'first_reply';
+  if (item.replyStatus === 'bounced') return 'undelivered';
+  return 'first_email';
+}
 const list = document.querySelector('#letters');
 const count = document.querySelector('#count');
 function element(tag, content, className) {
@@ -551,6 +582,13 @@ function letter(item) {
   meta.append(element('strong', item.company), date);
   summary.append(meta, element('span', item.subject, 'subject'),
     element('span', statuses[item.replyStatus], 'status ' + item.replyStatus));
+  const stage = element('span');
+  function showStage(value) {
+    stage.className = 'stage ' + value;
+    stage.textContent = stages[value];
+  }
+  showStage(currentStage(item));
+  summary.append(stage);
   const message = element('div', '', 'message');
   message.append(element('p', 'Кому — ' + item.to, 'address'), element('p', item.body, 'body'));
   const gmailUrl = 'https://mail.google.com/mail/u/0/#all/' + item.gmailThreadId;
@@ -573,7 +611,32 @@ function letter(item) {
     link.rel = 'noopener noreferrer';
     actions.append(link);
   }
-  message.append(actions);
+  const stageControl = element('label', 'Этап переписки', 'stage-control');
+  const select = element('select');
+  const automatic = element('option', 'По статусу Gmail');
+  automatic.value = '';
+  select.append(automatic);
+  for (const [value, label] of Object.entries(stages)) {
+    const option = element('option', label);
+    option.value = value;
+    select.append(option);
+  }
+  const savedStage = stageOverrides[item.gmailThreadId];
+  select.value = Object.hasOwn(stages, savedStage) ? savedStage : '';
+  const note = element('small', 'Выбранный этап хранится в этом браузере.', 'stage-note');
+  select.addEventListener('change', () => {
+    if (select.value) stageOverrides[item.gmailThreadId] = select.value;
+    else delete stageOverrides[item.gmailThreadId];
+    showStage(currentStage(item));
+    try {
+      localStorage.setItem(stageKey, JSON.stringify(stageOverrides));
+      note.textContent = 'Выбранный этап хранится в этом браузере.';
+    } catch {
+      note.textContent = 'Браузер не сохранил этап. Он сбросится при обновлении страницы.';
+    }
+  });
+  stageControl.append(select, note);
+  message.append(stageControl, actions);
   details.append(summary, message);
   return details;
 }
