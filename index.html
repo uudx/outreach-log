@@ -537,7 +537,7 @@ button:focus-visible,a:focus-visible,summary:focus-visible,input:focus-visible{o
   "checkedAt": "2026-11-24T13:02:17.000Z"
 }</script>
 <script>
-const data = JSON.parse(document.querySelector('#data').textContent);
+let data = JSON.parse(document.querySelector('#data').textContent);
 const formatter = new Intl.DateTimeFormat('ru-RU', {
   timeZone: data.timeZone, dateStyle: 'medium', timeStyle: 'medium'
 });
@@ -580,8 +580,9 @@ function letter(item) {
   date.dateTime = item.sentAt;
   const meta = element('span', '', 'meta');
   meta.append(element('strong', item.company), date);
+  const replyTime = item.lastReplyAt ? ' · ' + formatter.format(new Date(item.lastReplyAt)) : '';
   summary.append(meta, element('span', item.subject, 'subject'),
-    element('span', statuses[item.replyStatus], 'status ' + item.replyStatus));
+    element('span', statuses[item.replyStatus] + replyTime, 'status ' + item.replyStatus));
   const stage = element('span');
   function showStage(value) {
     stage.className = 'stage ' + value;
@@ -646,12 +647,41 @@ function render() {
     (!statusFilter.value || item.replyStatus === statusFilter.value) && [item.company, item.subject, item.to, item.body].join(' ').toLocaleLowerCase('ru').includes(term)
   );
   count.textContent = 'Писем: ' + matches.length + ' из ' + data.messages.length + ' · Проверка Gmail: ' + formatter.format(new Date(data.checkedAt)) + ' (UTC+5)';
-  list.replaceChildren(...matches.map(letter));
+  const openThreads = new Set([...list.querySelectorAll('details[open]')].map(card => card.dataset.thread));
+  list.replaceChildren(...matches.map(item => {
+    const card = letter(item);
+    card.dataset.thread = item.gmailThreadId;
+    card.open = openThreads.has(item.gmailThreadId);
+    return card;
+  }));
   if (!matches.length) list.append(element('p', 'По вашему запросу ничего не найдено.'));
 }
 query.addEventListener('input', render);
 statusFilter.addEventListener('change', render);
 render();
+
+let refreshing = false;
+async function refreshJournal() {
+  if (refreshing || document.hidden) return;
+  refreshing = true;
+  try {
+    const source = new URL('https://raw.githubusercontent.com/uudx/outreach-log/main/outreach.json');
+    source.searchParams.set('v', Math.floor(Date.now() / 60000));
+    const response = await fetch(source, {cache:'no-store'});
+    if (!response.ok) return;
+    const next = await response.json();
+    if (!Array.isArray(next.messages) || !next.checkedAt || next.checkedAt <= data.checkedAt) return;
+    data = next;
+    render();
+  } catch {
+    // Keep displaying the last verified snapshot while offline.
+  } finally {
+    refreshing = false;
+  }
+}
+refreshJournal();
+setInterval(refreshJournal, 60000);
+document.addEventListener('visibilitychange', refreshJournal);
 </script>
 </body>
 </html>
